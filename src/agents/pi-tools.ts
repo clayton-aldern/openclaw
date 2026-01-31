@@ -26,6 +26,7 @@ import type { ModelAuthMode } from "./model-auth.js";
 import { createOpenClawTools } from "./openclaw-tools.js";
 import { wrapToolWithAbortSignal } from "./pi-tools.abort.js";
 import { wrapToolWithBeforeToolCallHook } from "./pi-tools.before-tool-call.js";
+import { wrapToolsWithResultTransform } from "./pi-tools.transform.js";
 import {
   isToolAllowedByPolicies,
   resolveEffectiveToolPolicy,
@@ -510,8 +511,16 @@ export function createOpenClawCodingTools(options?: {
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
     : withHooks;
 
+  // Apply tool_result_transform hook wrapper to all tools.
+  // This allows plugins like prompt injection defenders to modify tool results
+  // before they are sent back to the model.
+  const withTransform = wrapToolsWithResultTransform(withAbort, {
+    agentId: options?.sessionKey?.split(":")?.[1],
+    sessionKey: options?.sessionKey,
+  });
+
   // NOTE: Keep canonical (lowercase) tool names here.
   // pi-ai's Anthropic OAuth transport remaps tool names to Claude Code-style names
   // on the wire and maps them back for tool dispatch.
-  return withAbort;
+  return withTransform;
 }
