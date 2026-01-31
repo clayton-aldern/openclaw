@@ -58,11 +58,7 @@ const MAX_PREPEND_SIZE = 10000;
 /**
  * Wrap a promise with a timeout.
  */
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  timeoutError: string,
-): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutError: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(timeoutError));
@@ -140,9 +136,7 @@ export function wrapToolWithResultTransform(
 
           // Validate: must be array of content blocks
           if (!isValidContentArray(prepend)) {
-            console.warn(
-              `[tool_result_transform] Invalid prependContent structure, ignoring`,
-            );
+            console.warn(`[tool_result_transform] Invalid prependContent structure, ignoring`);
             return result;
           }
 
@@ -156,13 +150,11 @@ export function wrapToolWithResultTransform(
           }
 
           // PREPEND hook content to original (original always preserved)
-          const originalContent = Array.isArray(result.content)
-            ? result.content
-            : [result.content];
+          const originalContent = Array.isArray(result.content) ? result.content : [result.content];
 
           return {
             ...result,
-            content: [...prepend, ...originalContent] as AgentToolResult["content"],
+            content: [...prepend, ...originalContent] as AgentToolResult<unknown>["content"],
           };
         }
       } catch (err) {
@@ -179,18 +171,15 @@ export function wrapToolWithResultTransform(
 
 /**
  * Check if a tool result indicates an error.
+ * Heuristic: look for error-like patterns in text content.
  */
-function isToolResultError(result: AgentToolResult): boolean {
-  if (result.isError) return true;
-
+function isToolResultError(result: AgentToolResult<unknown>): boolean {
   const content = result.content;
   if (!Array.isArray(content)) return false;
 
   for (const block of content) {
-    if (typeof block !== "object" || block === null) continue;
-    const rec = block as Record<string, unknown>;
-    if (rec.type === "text" && typeof rec.text === "string") {
-      const text = rec.text;
+    if (block.type === "text" && "text" in block) {
+      const text = (block as { type: "text"; text: string }).text;
       if (
         text.startsWith("Error:") ||
         text.startsWith("error:") ||
