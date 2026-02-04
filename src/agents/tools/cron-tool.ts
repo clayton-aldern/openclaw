@@ -10,10 +10,10 @@ import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, type GatewayCallOptions } from "./gateway.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
-// NOTE: We use Type.Object({}, { additionalProperties: true }) for job/patch
-// instead of CronAddParamsSchema/CronJobPatchSchema because the gateway schemas
-// contain nested unions. Tool schemas need to stay provider-friendly, so we
-// accept "any object" here and validate at runtime.
+// NOTE: We define explicit schemas for job/patch to help OpenAI-compatible providers
+// (like Fireworks/Kimi) generate proper nested objects. Without explicit property
+// definitions, some providers generate empty {} objects. We use additionalProperties
+// to allow extra fields while still guiding the model on expected structure.
 
 const CRON_ACTIONS = ["status", "list", "add", "update", "remove", "run", "runs", "wake"] as const;
 
@@ -25,6 +25,62 @@ const REMINDER_CONTEXT_PER_MESSAGE_MAX = 220;
 const REMINDER_CONTEXT_TOTAL_MAX = 700;
 const REMINDER_CONTEXT_MARKER = "\n\nRecent context:\n";
 
+// Schedule schema - simplified to avoid complex unions that confuse some providers
+const CronScheduleSchema = Type.Object(
+  {
+    kind: Type.String({ description: 'Schedule type: "at", "every", or "cron"' }),
+    atMs: Type.Optional(Type.Number({ description: "Unix timestamp in ms (for kind=at)" })),
+    everyMs: Type.Optional(Type.Number({ description: "Interval in ms (for kind=every)" })),
+    anchorMs: Type.Optional(
+      Type.Number({ description: "Anchor timestamp in ms (for kind=every)" }),
+    ),
+    expr: Type.Optional(Type.String({ description: "Cron expression (for kind=cron)" })),
+    tz: Type.Optional(Type.String({ description: "IANA timezone (for kind=cron)" })),
+  },
+  { additionalProperties: true },
+);
+
+// Payload schema - covers systemEvent and agentTurn
+const CronPayloadSchema = Type.Object(
+  {
+    kind: Type.String({ description: 'Payload type: "systemEvent" or "agentTurn"' }),
+    text: Type.Optional(Type.String({ description: "Message text (for kind=systemEvent)" })),
+    message: Type.Optional(Type.String({ description: "Agent prompt (for kind=agentTurn)" })),
+    model: Type.Optional(Type.String({ description: "Model override (for kind=agentTurn)" })),
+    thinking: Type.Optional(Type.String({ description: "Thinking level (for kind=agentTurn)" })),
+    timeoutSeconds: Type.Optional(Type.Number({ description: "Timeout (for kind=agentTurn)" })),
+    deliver: Type.Optional(Type.Boolean({ description: "Deliver output (for kind=agentTurn)" })),
+    channel: Type.Optional(Type.String({ description: "Delivery channel (for kind=agentTurn)" })),
+    to: Type.Optional(Type.String({ description: "Delivery destination (for kind=agentTurn)" })),
+    bestEffortDeliver: Type.Optional(Type.Boolean({ description: "Best effort delivery" })),
+  },
+  { additionalProperties: true },
+);
+
+// Job schema for cron.add - explicit properties help providers generate correct structure
+const CronJobSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ description: "Job name (optional but recommended)" })),
+    schedule: CronScheduleSchema,
+    sessionTarget: Type.String({ description: 'Session target: "main" or "isolated"' }),
+    payload: CronPayloadSchema,
+    enabled: Type.Optional(Type.Boolean({ description: "Whether job is enabled (default: true)" })),
+  },
+  { additionalProperties: true },
+);
+
+// Patch schema for cron.update - all fields optional
+const CronJobPatchSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String()),
+    schedule: Type.Optional(CronScheduleSchema),
+    sessionTarget: Type.Optional(Type.String()),
+    payload: Type.Optional(CronPayloadSchema),
+    enabled: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: true },
+);
+
 // Flattened schema: runtime validates per-action requirements.
 const CronToolSchema = Type.Object({
   action: stringEnum(CRON_ACTIONS),
@@ -32,10 +88,10 @@ const CronToolSchema = Type.Object({
   gatewayToken: Type.Optional(Type.String()),
   timeoutMs: Type.Optional(Type.Number()),
   includeDisabled: Type.Optional(Type.Boolean()),
-  job: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  job: Type.Optional(CronJobSchema),
   jobId: Type.Optional(Type.String()),
   id: Type.Optional(Type.String()),
-  patch: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  patch: Type.Optional(CronJobPatchSchema),
   text: Type.Optional(Type.String()),
   mode: optionalStringEnum(CRON_WAKE_MODES),
   runMode: optionalStringEnum(CRON_RUN_MODES),
