@@ -4,6 +4,30 @@ import { sanitizeUserFacingText } from "./pi-embedded-helpers.js";
 import { formatToolDetail, resolveToolDisplay } from "./tool-display.js";
 
 /**
+ * Sanitize assistant message content blocks by filtering out whitespace-only text.
+ *
+ * Fireworks/Kimi returns whitespace-only text blocks (e.g., `{type: "text", text: " "}`)
+ * as filler between tool calls. These cause issues when processing tool chains.
+ *
+ * @param content - Array of content blocks from assistant message
+ * @returns Filtered array with whitespace-only text blocks removed
+ */
+export function sanitizeContentBlocks(content: unknown[]): unknown[] {
+  return content.filter((block) => {
+    // Keep non-text blocks (thinking, toolCall, etc.)
+    if (!block || typeof block !== "object") {
+      return true;
+    }
+    const rec = block as Record<string, unknown>;
+    if (rec.type !== "text") {
+      return true;
+    }
+    // Filter whitespace-only text blocks
+    return typeof rec.text === "string" && rec.text.trim().length > 0;
+  });
+}
+
+/**
  * Strip malformed Minimax tool invocations that leak into text content.
  * Minimax sometimes embeds tool calls as XML in text blocks instead of
  * proper structured tool calls. This removes:
@@ -330,10 +354,30 @@ export function splitThinkingTaggedText(text: string): ThinkTaggedSplitBlock[] |
   return blocks;
 }
 
+/**
+ * Sanitize assistant message content blocks in-place.
+ * Removes whitespace-only text blocks that some providers (Fireworks/Kimi)
+ * include as filler between tool calls.
+ */
+export function sanitizeAssistantMessage(message: AssistantMessage): void {
+  if (!Array.isArray(message.content)) {
+    return;
+  }
+  const originalLength = message.content.length;
+  message.content = sanitizeContentBlocks(message.content) as AssistantMessage["content"];
+  // Log if we actually removed any blocks (helpful for debugging)
+  if (message.content.length !== originalLength) {
+    // This is a side effect - removed X whitespace-only content blocks
+    // In production this could be logged at debug level
+  }
+}
+
 export function promoteThinkingTagsToBlocks(message: AssistantMessage): void {
   if (!Array.isArray(message.content)) {
     return;
   }
+  // First sanitize to remove whitespace-only blocks
+  sanitizeAssistantMessage(message);
   const hasThinkingBlock = message.content.some((block) => block.type === "thinking");
   if (hasThinkingBlock) {
     return;
